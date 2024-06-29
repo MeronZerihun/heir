@@ -31,14 +31,11 @@ class Secretness {
   static Secretness join(const Secretness &lhs, const Secretness &rhs) {
     if (!lhs.isInitialized()) return rhs;
     if (!rhs.isInitialized()) return lhs;
-    Secretness *result = new Secretness();
-    result->setSecretness(lhs.getSecretness() || rhs.getSecretness());
-    return *result;
+
+    return Secretness{lhs.getSecretness() || rhs.getSecretness()};
   }
 
-  void print(raw_ostream &os) const {
-    os << "Secretness: " << secretness << "\n";
-  }
+  void print(raw_ostream &os) const { os << "Secretness: " << secretness; }
 
  private:
   std::optional<bool> secretness;

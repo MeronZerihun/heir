@@ -15,58 +15,43 @@ namespace mlir {
 namespace heir {
 
 void SecretnessAnalysis::setToEntryState(SecretnessLattice *lattice) {
-  llvm::errs() << "Entry State ";
-
   auto operand = lattice->getPoint();
-  operand.dump();
   bool isSecret = isa<secret::SecretType>(operand.getType());
 
   Operation *operation = nullptr;
+  // Get defining operation for operand
   if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
     operation = blockArg.getOwner()->getParentOp();
   } else {
     operation = operand.getDefiningOp();
   }
 
+  // If operand is defined by a secret.generic operation, check if operand is of
+  // secret type
   if (auto genericOp = dyn_cast<secret::GenericOp>(*operation)) {
     if (OpOperand *genericOperand =
             genericOp.getOpOperandForBlockArgument(operand)) {
       isSecret = isa<secret::SecretType>(genericOperand->get().getType());
     }
   }
-  auto *secretness = new Secretness();
-  secretness->setSecretness(isSecret);
-  propagateIfChanged(lattice, lattice->join(*secretness));
-  llvm::errs() << lattice->getValue();
-
-  llvm::errs() << "-- Done Entry State --\n";
+  propagateIfChanged(lattice, lattice->join(Secretness(isSecret)));
 }
 
 void SecretnessAnalysis::visitOperation(
     Operation *operation, ArrayRef<const SecretnessLattice *> operands,
     ArrayRef<SecretnessLattice *> results) {
-  llvm::errs() << "Visiting operation: " << operation->getName() << "\n";
-
   for (const SecretnessLattice *operand : operands) {
     bool isSecret = false;
+    auto *operandSecretness = &(operand->getValue());
     for (SecretnessLattice *result : results) {
-      auto *operandSecretness = &(operand->getValue());
-      result->getPoint().dump();
-      auto *secretness = new Secretness();
       if (operandSecretness->isInitialized() &&
           operandSecretness->getSecretness()) {
-        isSecret = true;
-        secretness->setSecretness(isSecret);
-        propagateIfChanged(result, result->join(*secretness));
-      } else {
-        secretness->setSecretness(isSecret);
-        propagateIfChanged(result, result->join(*secretness));
+        isSecret |= true;
       }
-      llvm::errs() << result->getValue();
+      propagateIfChanged(result, result->join(Secretness(isSecret)));
     }
     if (isSecret) break;
   }
-  llvm::errs() << "-- Done Visiting Operation --\n";
 }
 
 }  // namespace heir

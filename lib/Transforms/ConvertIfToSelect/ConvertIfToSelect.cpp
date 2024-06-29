@@ -20,8 +20,19 @@ namespace heir {
 struct IfToSelectConversion : OpRewritePattern<scf::IfOp> {
   using OpRewritePattern<scf::IfOp>::OpRewritePattern;
 
+ public:
+  IfToSelectConversion(DataFlowSolver *solver, MLIRContext *context)
+      : OpRewritePattern(context), solver(solver){};
+
   LogicalResult matchAndRewrite(scf::IfOp ifOp,
                                 PatternRewriter &rewriter) const override {
+    auto isConditionSecret =
+        solver->lookupState<SecretnessLattice>(ifOp.getOperand())
+            ->getValue()
+            .getSecretness();
+    // No conversion if condition is not secret
+    if (!isConditionSecret) return failure();
+
     // Hoist instructions in the 'then' and 'else' regions
     auto thenOps = ifOp.getThenRegion().getOps();
     auto elseOps = ifOp.getElseRegion().getOps();
@@ -62,13 +73,15 @@ struct IfToSelectConversion : OpRewritePattern<scf::IfOp> {
 
     return success();
   }
+
+ private:
+  DataFlowSolver *solver;
 };
 
 struct ConvertIfToSelect : impl::ConvertIfToSelectBase<ConvertIfToSelect> {
   using ConvertIfToSelectBase::ConvertIfToSelectBase;
 
-void runOnOperation() override {
-    llvm::errs() << "RunOnOperation\n";
+  void runOnOperation() override {
     MLIRContext *context = &getContext();
 
     RewritePatternSet patterns(context);
@@ -86,26 +99,7 @@ void runOnOperation() override {
       return;
     }
 
-    OpBuilder builder(context);
-    llvm::errs() << "Start walking\n";
-
-    getOperation()->walk([&](Operation *operation) {
-      llvm::errs() << "Operation: " << operation->getName() << "\n";
-      for (auto operand : operation->getOperands()) {
-        Secretness lattice =
-            (solver.lookupState<SecretnessLattice>(operand))->getValue();
-        llvm::errs() << "\tOperand : " << operand << "; lattice: ";
-        lattice.print(llvm::errs());
-      }
-      for (auto result : operation->getResults()) {
-        Secretness lattice =
-            (solver.lookupState<SecretnessLattice>(result))->getValue();
-        llvm::errs() << "\tResult : " << result << "; lattice: ";
-        lattice.print(llvm::errs());
-      }
-    });
-
-    patterns.add<IfToSelectConversion>(context);
+    patterns.add<IfToSelectConversion>(&solver, context);
     (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
   }
 };
