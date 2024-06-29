@@ -1,5 +1,9 @@
 #include "lib/Transforms/ConvertIfToSelect/ConvertIfToSelect.h"
 
+#include "lib/Analysis/SecretnessAnalysis/SecretnessAnalysis.h"
+#include "mlir/include/mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h"  // from @llvm-project
+#include "mlir/include/mlir/Analysis/DataFlow/DeadCodeAnalysis.h"  // from @llvm-project
+#include "mlir/include/mlir/Analysis/DataFlow/SparseAnalysis.h"  // from @llvm-project
 #include "mlir/include/mlir/Dialect/SCF/IR/SCF.h"  // from @llvm-project
 #include "mlir/include/mlir/IR/Operation.h"        // from @llvm-project
 #include "mlir/include/mlir/IR/PatternMatch.h"     // from @llvm-project
@@ -63,12 +67,45 @@ struct IfToSelectConversion : OpRewritePattern<scf::IfOp> {
 struct ConvertIfToSelect : impl::ConvertIfToSelectBase<ConvertIfToSelect> {
   using ConvertIfToSelectBase::ConvertIfToSelectBase;
 
-  void runOnOperation() override {
+void runOnOperation() override {
+    llvm::errs() << "RunOnOperation\n";
     MLIRContext *context = &getContext();
+
     RewritePatternSet patterns(context);
 
-    patterns.add<IfToSelectConversion>(context);
+    DataFlowSolver solver;
+    solver.load<dataflow::DeadCodeAnalysis>();
+    solver.load<dataflow::SparseConstantPropagation>();
+    solver.load<SecretnessAnalysis>();
 
+    auto result = solver.initializeAndRun(getOperation());
+
+    if (failed(result)) {
+      getOperation()->emitOpError() << "Failed to run the analysis.\n";
+      signalPassFailure();
+      return;
+    }
+
+    OpBuilder builder(context);
+    llvm::errs() << "Start walking\n";
+
+    getOperation()->walk([&](Operation *operation) {
+      llvm::errs() << "Operation: " << operation->getName() << "\n";
+      for (auto operand : operation->getOperands()) {
+        Secretness lattice =
+            (solver.lookupState<SecretnessLattice>(operand))->getValue();
+        llvm::errs() << "\tOperand : " << operand << "; lattice: ";
+        lattice.print(llvm::errs());
+      }
+      for (auto result : operation->getResults()) {
+        Secretness lattice =
+            (solver.lookupState<SecretnessLattice>(result))->getValue();
+        llvm::errs() << "\tResult : " << result << "; lattice: ";
+        lattice.print(llvm::errs());
+      }
+    });
+
+    patterns.add<IfToSelectConversion>(context);
     (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
   }
 };
