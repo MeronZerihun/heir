@@ -41,10 +41,16 @@ struct IfToSelectConversion : OpRewritePattern<scf::IfOp> {
     for (auto &operation : llvm::make_early_inc_range(
              llvm::concat<Operation>(thenOps, elseOps))) {
       if (!isPure(&operation)) {
-        ifOp->emitError()
-            << "Can't convert scf.if to arith.select operation. If-operation "
-               "contains code that can't be safely hoisted on line "
-            << operation.getLoc();
+        // Using custom error message, as default looks bad with multiple ops
+        InFlightDiagnostic diag = mlir::emitError(
+            operation.getLoc(),
+            "Cannot convert scf.if to arith.select, "
+            "as it contains code that cannot be safely hoisted:");
+        if (getContext()->shouldPrintOpOnDiagnostic()) {
+          diag.attachNote(ifOp->getLoc())
+              .append("containing scf.if operation:")
+              .appendOp(*ifOp, OpPrintingFlags().printGenericOpForm());
+        }
         return failure();
       }
       if (!llvm::isa<scf::YieldOp>(operation)) {
