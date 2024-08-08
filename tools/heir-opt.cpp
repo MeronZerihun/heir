@@ -446,6 +446,7 @@ void mlirToBgvPipelineBuilder(OpPassManager &pm,
   // Secretize inputs
   pm.addPass(createSecretize(SecretizeOptions{options.entryFunction}));
   pm.addPass(createWrapGeneric());
+  pm.addPass(createConvertIfToSelect());
   pm.addPass(createCanonicalizerPass());
   pm.addPass(createCSEPass());
 
