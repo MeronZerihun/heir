@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "llvm/include/llvm/Support/Debug.h"  // from @llvm-project
 #include "mlir/include/mlir/Analysis/DataFlow/DeadCodeAnalysis.h"  // from @llvm-project
 #include "mlir/include/mlir/Analysis/DataFlow/IntegerRangeAnalysis.h"  // from @llvm-project
 #include "mlir/include/mlir/Analysis/DataFlowFramework.h"  // from @llvm-project
@@ -13,6 +14,8 @@
 #include "mlir/include/mlir/IR/Visitors.h"                 // from @llvm-project
 #include "mlir/include/mlir/Support/LLVM.h"                // from @llvm-project
 #include "mlir/include/mlir/Support/LogicalResult.h"       // from @llvm-project
+
+#define DEBUG_TYPE "integer-range-test"
 
 namespace mlir {
 namespace heir {
@@ -36,31 +39,33 @@ struct IntegerRangeTest : impl::IntegerRangeTestBase<IntegerRangeTest> {
 
     if (failed(solver.initializeAndRun(module))) signalPassFailure();
 
-    auto result = module->walk([&](Operation *op) {
-      llvm::errs() << "$ Testing range of: " << *op << "\n";
+    LLVM_DEBUG({
+      // Add an attribute to the operations to show determined secretness
+      OpBuilder builder(context);
+      module->walk([&](Operation *op) {
+        // If op doesn't return results, advance to the next op
+        if (!op->getNumResults()) {
+          return WalkResult::advance();
+        }
 
-      // If op doesn't return results, advance to the next op
-      if (!op->getNumResults()) {
+        const dataflow::IntegerValueRangeLattice *opRange =
+            solver.lookupState<dataflow::IntegerValueRangeLattice>(
+                op->getResult(0));
+        if (!opRange || opRange->getValue().isUninitialized()) {
+          op->setAttr("integer-range",
+                      builder.getStringAttr("null or unknown"));
+          return WalkResult::interrupt();
+        }
+        ConstantIntRanges range = opRange->getValue().getValue();
+        op->setAttr(
+            "integer-range",
+            builder.getStringAttr(
+                "[" + std::to_string(range.smin().getZExtValue()) + ", " +
+                std::to_string(range.smax().getZExtValue()) + "]"));
+
         return WalkResult::advance();
-      }
-
-      const dataflow::IntegerValueRangeLattice *opRange =
-          solver.lookupState<dataflow::IntegerValueRangeLattice>(
-              op->getResult(0));
-      if (!opRange || opRange->getValue().isUninitialized()) {
-        op->emitOpError()
-            << "Found op without a set integer range; did the analysis fail?";
-        return WalkResult::interrupt();
-      }
-
-      ConstantIntRanges range = opRange->getValue().getValue();
-      op->emitRemark() << "Range: [" << range.smin().getZExtValue() << ", "
-                       << range.smax().getZExtValue() << "]";
-
-      return WalkResult::advance();
+      });
     });
-
-    if (result.wasInterrupted()) signalPassFailure();
   }
 };
 

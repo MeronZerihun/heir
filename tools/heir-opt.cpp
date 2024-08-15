@@ -596,6 +596,7 @@ int main(int argc, char **argv) {
   registerConvertIfToSelectPasses();
   registerConvertSecretForToStaticForPasses();
   registerConvertSecretWhileToStaticForPasses();
+  registerIntegerRangeTestPasses();
   registerApplyFoldersPasses();
   registerForwardStoreToLoadPasses();
   registerOperationBalancerPasses();
